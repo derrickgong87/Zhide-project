@@ -14,6 +14,7 @@ const INITIAL_PROFILE: Candidate = {
   education: '哥伦比亚大学, MBA',
   skills: ['产品战略', '用户增长', '数据分析', '团队管理'],
   currentSalary: '120万',
+  targetSalary: '150万',
   status: '面试中',
   summary: '拥有国际视野的产品领导者，寻求B轮以后企业的核心管理岗位。',
 };

@@ -1,158 +1,168 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { Candidate, Job, MatchResult } from "../types";
 
-// Initialize Gemini Client
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// --- Configuration ---
+const API_KEY = process.env.API_KEY;
+const MODEL_NAME = "gemini-2.5-flash"; // Fast, cheap, large context window
 
-const MODEL_FAST = "gemini-2.5-flash";
-const MODEL_REASONING = "gemini-2.5-flash";
+const ai = new GoogleGenAI({ apiKey: API_KEY });
+
+// --- Schemas ---
+// Defined centrally for consistency
+
+const CandidateSchema = {
+  type: Type.OBJECT,
+  properties: {
+    name: { type: Type.STRING, description: "Candidate's full name" },
+    title: { type: Type.STRING, description: "Current or most recent job title" },
+    experienceYears: { type: Type.NUMBER, description: "Total years of professional experience" },
+    education: { type: Type.STRING, description: "Highest degree and university (e.g., '清华大学, 计算机硕士')" },
+    skills: { type: Type.ARRAY, items: { type: Type.STRING }, description: "List of top 5-10 technical or professional skills" },
+    currentSalary: { type: Type.STRING, description: "Current annual salary (e.g., '80万', 'Unknown')" },
+    targetSalary: { type: Type.STRING, description: "Target/Expected annual salary" },
+    summary: { type: Type.STRING, description: "A professional summary (max 100 words) highlighting achievements" },
+    email: { type: Type.STRING, description: "Email address if found" },
+    phone: { type: Type.STRING, description: "Phone number if found" },
+  },
+  required: ["name", "title", "experienceYears", "education", "skills", "summary"],
+};
+
+const MatchListSchema = {
+  type: Type.ARRAY,
+  items: {
+    type: Type.OBJECT,
+    properties: {
+      jobId: { type: Type.STRING, description: "The exact ID of the job from the input list" },
+      score: { type: Type.NUMBER, description: "Match score from 0 to 100" },
+      reason: { type: Type.STRING, description: "Concise explanation of the match in Chinese" },
+      overlappingKeywords: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Keywords present in both Resume and JD" },
+    },
+    required: ["jobId", "score", "reason", "overlappingKeywords"],
+  },
+};
+
+// --- Services ---
 
 /**
- * 简历解析 (Resume Parsing) - Supports Text or Base64 PDF
+ * Parses a resume (Text or Base64 PDF) into a structured Candidate object.
  */
 export const parseResumeWithAI = async (
   input: { type: 'text' | 'base64', data: string, mimeType?: string }
 ): Promise<Partial<Candidate>> => {
+  if (!API_KEY) {
+    console.warn("API Key missing, returning mock data.");
+    return mockParseFallback();
+  }
+
   try {
-    const prompt = `
-      你是一位资深的高端人才招聘专家。请分析这份简历并提取结构化数据。
-      返回 JSON 格式。
-      
-      请提取以下字段：
-      - name: 姓名
-      - title: 当前或最近的职位头衔
-      - experienceYears: 工作年限 (数字)
-      - education: 最高学历 (格式: 学校, 专业/学位)
-      - skills: 关键技能列表 (数组)
-      - currentSalary: 目前薪资 (如有，否则估算或留空)
-      - summary: 简短的专业能力摘要，突出亮点 (100字以内)
-      - targetSalary: 期望薪资 (如有)
+    const systemPrompt = `
+      You are an expert HR recruiter for high-end talent. 
+      Extract structured data from the provided resume.
+      - If exact salary is not found, use "面议" or estimate based on level.
+      - Summarize the profile professionally in Chinese.
     `;
 
-    let contents;
+    const parts = [];
     if (input.type === 'base64') {
-        contents = {
-            parts: [
-                { inlineData: { mimeType: input.mimeType || 'application/pdf', data: input.data } },
-                { text: prompt }
-            ]
-        };
+      parts.push({ inlineData: { mimeType: input.mimeType || 'application/pdf', data: input.data } });
+      parts.push({ text: "请解析这份简历。" });
     } else {
-        contents = `${prompt}\n\n简历内容:\n${input.data}`;
+      parts.push({ text: `请解析这份简历内容:\n${input.data}` });
     }
 
-    const response = await ai.models.generateContent({
-      model: MODEL_FAST,
-      contents: contents,
+    const result = await ai.models.generateContent({
+      model: MODEL_NAME,
+      contents: {
+        role: 'user',
+        parts: parts
+      },
       config: {
+        systemInstruction: systemPrompt,
         responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            name: { type: Type.STRING },
-            title: { type: Type.STRING },
-            experienceYears: { type: Type.NUMBER },
-            education: { type: Type.STRING },
-            skills: { type: Type.ARRAY, items: { type: Type.STRING } },
-            currentSalary: { type: Type.STRING },
-            targetSalary: { type: Type.STRING },
-            summary: { type: Type.STRING, description: "简短的专业能力摘要，突出亮点" },
-          },
-          required: ["name", "title", "skills", "summary"],
-        },
+        responseSchema: CandidateSchema,
       },
     });
 
-    if (response.text) {
-      return JSON.parse(response.text) as Partial<Candidate>;
+    if (result.text) {
+      return JSON.parse(result.text) as Partial<Candidate>;
     }
-    throw new Error("Empty response from AI");
+    throw new Error("No text returned from AI");
+
   } catch (error) {
-    console.error("Resume parsing failed:", error);
-    // Fallback if AI fails (for demo purposes if key is invalid or quota exceeded)
-    return {
-      name: "解析失败-请手动输入",
-      title: "",
-      experienceYears: 0,
-      education: "",
-      skills: [],
-      summary: "自动解析遇到问题，请手动补充信息。",
-      currentSalary: "",
-    };
+    console.error("Resume Parsing Error:", error);
+    throw error;
   }
 };
 
 /**
- * 智能人岗匹配 (Intelligent Matching)
+ * Matches a candidate against a list of jobs using AI reasoning.
+ * Optimized for batch processing.
  */
 export const matchCandidateToJobs = async (
   candidate: Candidate,
   jobs: Job[]
 ): Promise<MatchResult[]> => {
+  if (!API_KEY || jobs.length === 0) return [];
+
   try {
-    const jobsJson = JSON.stringify(jobs.map(j => ({ 
-      id: j.id, 
-      title: j.title, 
-      company: j.company, 
-      requirements: j.requirements, 
+    // optimize context: remove full descriptions to save tokens if list is huge, 
+    // but for <50 jobs, full description is better for accuracy.
+    const simplifiedJobs = jobs.map(j => ({
+      id: j.id,
+      title: j.title,
+      company: j.company,
       salary: j.salaryRange,
-      desc: j.description.substring(0, 150),
-      source: j.source
-    })));
-    const candidateJson = JSON.stringify(candidate);
+      requirements: j.requirements.join(', '),
+      description: j.description.slice(0, 300) // Truncate slightly for efficiency
+    }));
 
     const prompt = `
-      扮演一位顶级猎头顾问。
-      分析候选人与职位列表的匹配度。
-      只返回最匹配的 3 个职位（如果没有合适的，返回空数组）。
+      Candidate Profile: ${JSON.stringify(candidate)}
       
-      评价标准：
-      1. 硬性指标：薪资范围、工作年限、地点。
-      2. 软性指标：行业赛道匹配度、技能栈重合度、教育背景。
+      Job List: ${JSON.stringify(simplifiedJobs)}
       
-      输出要求：
-      1. score: 0-100 的匹配分数。
-      2. reason: 用中文简练地解释为什么匹配，提及具体的技能或经验重合点。
-      3. overlappingKeywords: 提取出简历和JD中重合的关键术语。
-      
-      候选人信息: ${candidateJson}
-      职位列表: ${jobsJson}
+      Task:
+      1. Analyze the candidate against EACH job in the list.
+      2. Assign a match score (0-100).
+      3. Provide a reasoning in Chinese (explain "Why this matches").
+      4. Extract overlapping keywords.
+      5. Return ONLY the top 5 matches sorted by score descending.
     `;
 
-    const response = await ai.models.generateContent({
-      model: MODEL_REASONING,
+    const result = await ai.models.generateContent({
+      model: MODEL_NAME,
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              jobId: { type: Type.STRING },
-              score: { type: Type.NUMBER },
-              reason: { type: Type.STRING },
-              overlappingKeywords: { type: Type.ARRAY, items: { type: Type.STRING } }
-            },
-            required: ["jobId", "score", "reason", "overlappingKeywords"],
-          },
-        },
+        responseSchema: MatchListSchema,
       },
     });
 
-    if (response.text) {
-      return JSON.parse(response.text) as MatchResult[];
+    if (result.text) {
+      return JSON.parse(result.text) as MatchResult[];
     }
     return [];
+
   } catch (error) {
-    console.error("Matching failed:", error);
+    console.error("Matching Error:", error);
     return [];
   }
 };
 
-/**
- * 初始化模拟数据
- */
+// --- Mock Data Generators (kept for initialization) ---
+
+const mockParseFallback = (): Partial<Candidate> => ({
+  name: "演示用户",
+  title: "高级经理",
+  experienceYears: 5,
+  education: "未配置API Key",
+  skills: ["请在", "环境变量中", "配置", "API_KEY"],
+  summary: "由于未检测到有效的 API Key，系统使用了默认的模拟数据。请检查 metadata.json 或环境配置。",
+  currentSalary: "Unknown",
+  targetSalary: "Unknown"
+});
+
 export const getInitialCandidates = (): Candidate[] => [
   {
     id: 'c1',
@@ -165,6 +175,7 @@ export const getInitialCandidates = (): Candidate[] => [
     targetSalary: '120万',
     status: '待业',
     summary: '十年亚太区市场经验，曾主导两家SaaS企业的从0到1增长。',
+    email: 'zhangwei@example.com'
   },
   {
     id: 'c2',

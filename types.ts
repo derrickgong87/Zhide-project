@@ -1,3 +1,4 @@
+
 export enum UserRole {
   B_SIDE = 'B_SIDE', // 猎头/企业 HR
   C_SIDE = 'C_SIDE', // 高端候选人
@@ -9,13 +10,14 @@ export interface Candidate {
   name: string;
   title: string;
   experienceYears: number;
-  education: string; // e.g., "清华大学, MBA"
+  education: string;
   skills: string[];
-  currentSalary?: string;
-  targetSalary?: string;
+  currentSalary: string;
+  targetSalary: string;
   status: '待业' | '面试中' | '已入职';
-  summary: string; // AI 生成的摘要
-  matchScore?: number;
+  summary: string;
+  email?: string; // Added for contact
+  phone?: string; // Added for contact
 }
 
 export interface Job {
@@ -25,22 +27,17 @@ export interface Job {
   location: string;
   salaryRange: string;
   requirements: string[];
-  tags: string[]; // e.g., "独家", "急招", "500强"
+  tags: string[];
   description: string;
-  source: 'Exclusive' | 'Crawler'; // Exclusive = B端录入/独家, Crawler = 爬虫抓取
-  originalUrl?: string; // 原始链接 (用于爬虫抓取的岗位)
+  source: 'Exclusive' | 'Crawler';
+  originalUrl?: string;
   postDate: string;
 }
 
 export interface MatchResult {
   jobId: string;
   score: number; // 0-100
-  reason: string; // AI 解释的匹配理由
-  overlappingKeywords: string[]; // 关键词重合点
-  jobDetails?: Job; // 为了前端方便展示
-}
-
-export interface AppState {
-  currentUserRole: UserRole;
-  isLoggedIn: boolean;
+  reason: string;
+  overlappingKeywords: string[];
+  jobDetails?: Job; // Hydrated on client side
 }
