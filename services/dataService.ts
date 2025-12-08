@@ -1,29 +1,52 @@
-
 import { StorageService } from "./storageService";
 import { parseResumeWithAI, matchCandidateToJobs } from "./geminiService";
 import { Candidate, Job, UserRole, MatchResult } from "../types";
 
+// --- CONFIGURATION ---
+// Toggle this to TRUE when the backend server (node server/dist/index.js) is running.
+const USE_REAL_BACKEND = false; 
+const API_URL = "http://localhost:3000/api";
+
 /**
- * DataService acts as the Backend Controller.
- * It coordinates between the Database (StorageService) and External APIs (Gemini).
+ * DataService acts as the abstraction layer.
+ * It can switch between the "Browser Simulation" (StorageService) 
+ * and the "Real Node.js Backend" (API_URL) seamlessly.
  */
 export const DataService = {
   
   // --- Auth Logic ---
-  login: (role: UserRole): boolean => {
-    // Simulating auth logic
-    const session = {
-      id: `user_${Date.now()}`,
-      role: role,
-      name: role === UserRole.B_SIDE ? '企业招聘负责人' : '高端求职者',
-      lastLogin: Date.now()
-    };
-    StorageService.setSession(session);
-    return true;
+  login: async (role: UserRole): Promise<boolean> => {
+    if (USE_REAL_BACKEND) {
+       // Example of how the real backend call would look
+       /*
+       const res = await fetch(`${API_URL}/../auth/login`, {
+         method: 'POST',
+         body: JSON.stringify({ email: 'demo@test.com', password: 'demo', role })
+       });
+       if (res.ok) {
+         const data = await res.json();
+         localStorage.setItem('token', data.token);
+         return true;
+       }
+       return false;
+       */
+       return true; 
+    } else {
+      // Simulation
+      const session = {
+        id: `user_${Date.now()}`,
+        role: role,
+        name: role === UserRole.B_SIDE ? '企业招聘负责人' : '高端求职者',
+        lastLogin: Date.now()
+      };
+      StorageService.setSession(session);
+      return true;
+    }
   },
 
   logout: () => {
     StorageService.setSession(null);
+    localStorage.removeItem('token');
   },
 
   getCurrentUser: () => {
@@ -33,13 +56,25 @@ export const DataService = {
   // --- Candidate Logic ---
   
   /**
-   * Uploads a resume (Base64), parses it via AI, and saves it to DB.
+   * Uploads a resume, parses it, and saves it.
    */
   uploadResume: async (base64Data: string, mimeType: string): Promise<Candidate> => {
-    // 1. Call AI Service
+    if (USE_REAL_BACKEND) {
+      /*
+      const res = await fetch(`${API_URL}/resume/upload`, {
+         method: 'POST',
+         headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` },
+         body: JSON.stringify({ textData: base64Data, mimeType })
+      });
+      return await res.json();
+      */
+      throw new Error("Backend not connected");
+    }
+
+    // 1. Call Client-side AI Service (Simulation)
     const parsedData = await parseResumeWithAI({ type: 'base64', data: base64Data, mimeType });
     
-    // 2. Hydrate into full Candidate object
+    // 2. Hydrate
     const newCandidate: Candidate = {
       id: `c_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       name: parsedData.name || "未命名候选人",
@@ -56,8 +91,7 @@ export const DataService = {
       updatedAt: new Date().toISOString()
     };
 
-    // 3. Save to DB
-    // Note: If C-side, we might usually overwrite 'me', but here we treat it as a pool
+    // 3. Save to Local DB
     StorageService.saveCandidate(newCandidate);
     
     return newCandidate;
@@ -80,19 +114,30 @@ export const DataService = {
   // --- Matching Logic ---
 
   /**
-   * Performs matching logic, either fetching from cache or running AI.
+   * Performs matching logic.
    */
   getMatchesForCandidate: async (candidateId: string, forceRefresh = false): Promise<MatchResult[]> => {
+    if (USE_REAL_BACKEND) {
+       /*
+       const res = await fetch(`${API_URL}/match/run`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` },
+          body: JSON.stringify({ candidateId })
+       });
+       return await res.json();
+       */
+       return [];
+    }
+
     // 1. Check Cache
     if (!forceRefresh) {
       const cached = StorageService.getMatchesForCandidate(candidateId);
       if (cached && cached.length > 0) {
-        // Hydrate job details (join operation)
         const jobs = StorageService.getJobs();
         return cached.map(m => ({
           ...m,
           jobDetails: jobs.find(j => j.id === m.jobId)
-        })).filter(m => m.jobDetails); // Ensure job still exists
+        })).filter(m => m.jobDetails); 
       }
     }
 
@@ -102,10 +147,10 @@ export const DataService = {
 
     if (!candidate || jobs.length === 0) return [];
 
-    // 3. Run AI Match
+    // 3. Run AI Match (Client Side Simulation)
     const rawMatches = await matchCandidateToJobs(candidate, jobs);
 
-    // 4. Save to DB (Cache)
+    // 4. Save to Local DB
     StorageService.saveMatches(candidateId, rawMatches);
 
     // 5. Return Enriched Results
