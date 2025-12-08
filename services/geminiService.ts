@@ -214,7 +214,8 @@ export const getInitialJobs = (): Job[] => [
     tags: ['独家', 'Pre-IPO', '期权激励'],
     description: '负责独角兽企业的全球市场战略，直接向CEO汇报，推动品牌出海。寻找具有狼性和国际视野的顶级市场操盘手。',
     source: 'Exclusive',
-    postDate: '2023-10-24'
+    postDate: '2023-10-24',
+    active: true
   },
   {
     id: 'j2',
@@ -227,7 +228,8 @@ export const getInitialJobs = (): Job[] => [
     description: '探索大规模语言模型的前沿边界，拥有顶级的计算资源支持。需要在NeurIPS/ICLR等顶会发表过一作论文。',
     source: 'Crawler',
     originalUrl: 'https://example.com/jobs/ai-researcher',
-    postDate: '2023-10-22'
+    postDate: '2023-10-22',
+    active: true
   },
   {
     id: 'j3',
@@ -239,7 +241,8 @@ export const getInitialJobs = (): Job[] => [
     tags: ['保密招聘', '高额奖金'],
     description: '统筹管理整个工程团队，负责核心交易系统的稳定性与安全性。需要有处理日均百亿级资金流水的经验。',
     source: 'Exclusive',
-    postDate: '2023-10-20'
+    postDate: '2023-10-20',
+    active: true
   },
   {
     id: 'j4',
@@ -252,7 +255,8 @@ export const getInitialJobs = (): Job[] => [
     description: '来自互联网公开招聘：负责电商中台的架构升级与性能优化。需要深入理解JVM底层原理。',
     source: 'Crawler',
     originalUrl: 'https://example.com/jobs/java-arch',
-    postDate: '2023-10-25'
+    postDate: '2023-10-25',
+    active: true
   },
    {
     id: 'j5',
@@ -264,6 +268,7 @@ export const getInitialJobs = (): Job[] => [
     tags: ['独家', '造车新势力', '股票激励'],
     description: '负责视觉感知算法团队的搭建与管理，直接汇报给CTO。',
     source: 'Exclusive',
-    postDate: '2023-10-26'
+    postDate: '2023-10-26',
+    active: true
   }
 ];

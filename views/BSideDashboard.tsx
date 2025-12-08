@@ -1,6 +1,7 @@
+
 import React, { useState, useEffect } from 'react';
 import { Candidate, Job, MatchResult } from '../types';
-import { getInitialCandidates, getInitialJobs, parseResumeWithAI, matchCandidateToJobs } from '../services/geminiService';
+import { DataService } from '../services/dataService';
 import { Button } from '../components/Button';
 import { Card, CardHeader, CardBody } from '../components/Card';
 import { Modal } from '../components/Modal';
@@ -22,10 +23,14 @@ export const BSideDashboard: React.FC = () => {
   const [matches, setMatches] = useState<MatchResult[]>([]);
   const [isMatching, setIsMatching] = useState(false);
 
-  // Load Initial Data
+  // Load Data via DataService
+  const refreshData = () => {
+    setCandidates(DataService.getAllCandidates());
+    setJobs(DataService.getAllJobs());
+  };
+
   useEffect(() => {
-    setCandidates(getInitialCandidates());
-    setJobs(getInitialJobs());
+    refreshData();
   }, []);
 
   // Handlers
@@ -36,82 +41,57 @@ export const BSideDashboard: React.FC = () => {
     setIsProcessing(true);
 
     try {
-      // Convert file to Base64
       const reader = new FileReader();
       reader.readAsDataURL(file);
       
       reader.onload = async () => {
         const base64String = reader.result as string;
-        // Remove "data:application/pdf;base64," prefix
         const base64Data = base64String.split(',')[1];
         
         try {
-          const parsedData = await parseResumeWithAI({ 
-            type: 'base64', 
-            data: base64Data, 
-            mimeType: file.type 
-          });
+          // Use DataService to handle logic
+          const newCandidate = await DataService.uploadResume(base64Data, file.type);
           
-          setEditingCandidate({
-            ...parsedData,
-            status: '待业', // Default status for new upload
-            targetSalary: parsedData.targetSalary || '面议'
-          });
+          setEditingCandidate(newCandidate);
           setIsProcessing(false);
           setIsEditModalOpen(true);
         } catch (error) {
           console.error(error);
           setIsProcessing(false);
-          alert('解析失败，请重试');
+          alert('解析失败，请检查API Key或文件格式');
         }
       };
-      
-      reader.onerror = () => {
-        setIsProcessing(false);
-        alert('文件读取失败');
-      };
-
     } catch (e) {
       setIsProcessing(false);
+      alert('文件读取错误');
     }
   };
 
   const saveNewCandidate = (data: Partial<Candidate>) => {
-    const newCandidate: Candidate = {
-      id: `c${Date.now()}`,
-      name: data.name || "未知",
-      title: data.title || "待定",
-      experienceYears: data.experienceYears || 0,
-      education: data.education || "未知",
-      skills: data.skills || [],
-      status: '待业',
-      summary: data.summary || "",
-      currentSalary: data.currentSalary,
-      targetSalary: data.targetSalary
-    };
-    
-    setCandidates(prev => [newCandidate, ...prev]);
-    setIsEditModalOpen(false);
-    // Automatically reset input value is tricky in React without ref, but OK for now
+    if (data.id && data.name) {
+       // Only save if it has ID (which it should from uploadResume)
+       // We cast to Candidate because form validation should ideally handle required fields
+       DataService.updateCandidateProfile(data as Candidate);
+       refreshData();
+       setIsEditModalOpen(false);
+    }
   };
 
   const runMatching = async (candidateId: string) => {
     setSelectedCandidateId(candidateId);
-    setActiveTab('match'); // Auto switch to match tab
+    setActiveTab('match'); 
     setIsMatching(true);
-    setMatches([]); // Clear previous
+    setMatches([]); 
 
-    const candidate = candidates.find(c => c.id === candidateId);
-    if (candidate) {
-      const results = await matchCandidateToJobs(candidate, jobs);
-      // Attach full job details to match results
-      const enrichedResults = results.map(r => ({
-        ...r,
-        jobDetails: jobs.find(j => j.id === r.jobId)
-      }));
-      setMatches(enrichedResults);
+    try {
+      const results = await DataService.getMatchesForCandidate(candidateId, true); // Force fresh match
+      setMatches(results);
+    } catch (e) {
+      console.error(e);
+      alert('匹配服务暂时不可用');
+    } finally {
+      setIsMatching(false);
     }
-    setIsMatching(false);
   };
 
   const chartData = [
@@ -120,7 +100,6 @@ export const BSideDashboard: React.FC = () => {
     { name: '已入职', count: candidates.filter(c => c.status === '已入职').length },
   ];
 
-  // 骨架屏组件 (Skeleton)
   const SkeletonRow = () => (
     <div className="animate-pulse flex items-center p-4 border-b border-slate-100">
       <div className="flex-1 space-y-2">
@@ -241,7 +220,7 @@ export const BSideDashboard: React.FC = () => {
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
                            <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 font-bold text-sm">
-                             {candidate.name.charAt(0)}
+                             {candidate.name?.charAt(0) || 'U'}
                            </div>
                            <div>
                              <div className="font-bold text-slate-900 text-base">{candidate.name}</div>
@@ -282,7 +261,7 @@ export const BSideDashboard: React.FC = () => {
           </div>
         )}
 
-        {/* ... Jobs and Match Tabs (Keep existing content mostly same) ... */}
+        {/* Jobs Tab */}
         {activeTab === 'jobs' && (
            <div className="space-y-6 animate-fadeIn">
              <div className="flex justify-between items-center">
@@ -342,6 +321,7 @@ export const BSideDashboard: React.FC = () => {
            </div>
         )}
 
+        {/* Match Tab */}
         {activeTab === 'match' && (
            <div className="flex gap-6 h-[calc(100vh-140px)] animate-fadeIn">
              {/* Left: Candidate Selector */}

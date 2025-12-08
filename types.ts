@@ -16,8 +16,9 @@ export interface Candidate {
   targetSalary: string;
   status: '待业' | '面试中' | '已入职';
   summary: string;
-  email?: string; // Added for contact
-  phone?: string; // Added for contact
+  email?: string;
+  phone?: string;
+  updatedAt?: string;
 }
 
 export interface Job {
@@ -32,6 +33,7 @@ export interface Job {
   source: 'Exclusive' | 'Crawler';
   originalUrl?: string;
   postDate: string;
+  active: boolean;
 }
 
 export interface MatchResult {
@@ -40,4 +42,20 @@ export interface MatchResult {
   reason: string;
   overlappingKeywords: string[];
   jobDetails?: Job; // Hydrated on client side
+  timestamp?: number;
+}
+
+// Backend Simulation Types
+export interface UserSession {
+  id: string;
+  role: UserRole;
+  name: string;
+  lastLogin: number;
+}
+
+export interface StorageSchema {
+  candidates: Candidate[];
+  jobs: Job[];
+  session: UserSession | null;
+  matchHistory: Record<string, MatchResult[]>; // candidateId -> matches
 }

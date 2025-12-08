@@ -1,5 +1,7 @@
+
 import React, { useState } from 'react';
 import { UserRole } from '../types';
+import { DataService } from '../services/dataService';
 import { Button } from '../components/Button';
 
 interface LoginProps {
@@ -10,6 +12,11 @@ type AuthStep = 'selection' | 'login-b' | 'login-c';
 
 export const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [step, setStep] = useState<AuthStep>('selection');
+
+  const handleLoginSubmit = (role: UserRole) => {
+    DataService.login(role); // Persist session
+    onLogin(role);
+  };
 
   // Step 1: Role Selection Landing View
   if (step === 'selection') {
@@ -124,7 +131,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
               <input type="password" className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-shadow" placeholder="••••••••" />
             </div>
             <Button 
-              onClick={() => onLogin(step === 'login-b' ? UserRole.B_SIDE : UserRole.C_SIDE)} 
+              onClick={() => handleLoginSubmit(step === 'login-b' ? UserRole.B_SIDE : UserRole.C_SIDE)} 
               className={`w-full h-12 text-base mt-4 ${step === 'login-c' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-slate-900 hover:bg-slate-800'}`}
             >
               立即登录

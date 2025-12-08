@@ -1,49 +1,62 @@
+
 import React, { useState, useEffect } from 'react';
-import { Candidate, Job, MatchResult } from '../types';
-import { getInitialJobs, matchCandidateToJobs, parseResumeWithAI } from '../services/geminiService';
+import { Candidate, MatchResult } from '../types';
+import { DataService } from '../services/dataService';
 import { Button } from '../components/Button';
 import { Modal } from '../components/Modal';
 import { CandidateForm } from '../components/CandidateForm';
 
-// Initial Mock Profile
-const INITIAL_PROFILE: Candidate = {
-  id: 'me',
-  name: 'Alex Chen',
-  title: '资深产品总监',
-  experienceYears: 8,
-  education: '哥伦比亚大学, MBA',
-  skills: ['产品战略', '用户增长', '数据分析', '团队管理'],
-  currentSalary: '120万',
-  targetSalary: '150万',
-  status: '面试中',
-  summary: '拥有国际视野的产品领导者，寻求B轮以后企业的核心管理岗位。',
-};
-
 export const CSideDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'jobs' | 'profile'>('jobs');
-  const [profile, setProfile] = useState<Candidate>(INITIAL_PROFILE);
-  const [matches, setMatches] = useState<{job: Job, match: MatchResult}[]>([]);
+  const [profile, setProfile] = useState<Candidate | null>(null);
+  const [matches, setMatches] = useState<MatchResult[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Profile Edit State
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
 
+  // Initialize Profile (Simulating a logged-in user)
+  useEffect(() => {
+    // In a real app, we'd get the ID from the session.
+    // For this demo, we'll try to find a candidate named "Alex Chen" or create a default one if DB is empty
+    const allCandidates = DataService.getAllCandidates();
+    let myProfile = allCandidates.find(c => c.name === 'Alex Chen');
+
+    if (!myProfile) {
+      // Create default if not exists in DB (first run)
+      myProfile = {
+        id: 'me_demo',
+        name: 'Alex Chen',
+        title: '资深产品总监',
+        experienceYears: 8,
+        education: '哥伦比亚大学, MBA',
+        skills: ['产品战略', '用户增长', '数据分析', '团队管理'],
+        currentSalary: '120万',
+        targetSalary: '150万',
+        status: '面试中',
+        summary: '拥有国际视野的产品领导者，寻求B轮以后企业的核心管理岗位。',
+        updatedAt: new Date().toISOString()
+      };
+      // We don't save this to the main DB list to avoid cluttering B-side unless user explicitly edits
+    }
+    setProfile(myProfile);
+  }, []);
+
+  // Fetch Matches when profile is ready
   useEffect(() => {
     const fetchMatches = async () => {
+      if (!profile) return;
+      
       setLoading(true);
-      // Simulate network delay for "Finding best fits"
-      await new Promise(r => setTimeout(r, 1200)); 
-      
-      const allJobs = getInitialJobs();
-      const matchResults = await matchCandidateToJobs(profile, allJobs);
-      
-      const combined = matchResults.map(m => ({
-        match: m,
-        job: allJobs.find(j => j.id === m.jobId)!
-      })).filter(item => item.job).sort((a, b) => b.match.score - a.match.score);
-      
-      setMatches(combined);
+      // Create a temporary candidate record in DB if it doesn't exist so matching works
+      let candidateId = profile.id;
+      if (!DataService.getAllCandidates().find(c => c.id === profile.id)) {
+         DataService.updateCandidateProfile(profile);
+      }
+
+      const matchResults = await DataService.getMatchesForCandidate(candidateId);
+      setMatches(matchResults.sort((a, b) => b.score - a.score));
       setLoading(false);
     };
 
@@ -67,16 +80,12 @@ export const CSideDashboard: React.FC = () => {
         const base64Data = base64String.split(',')[1];
         
         try {
-          const parsedData = await parseResumeWithAI({ 
-            type: 'base64', 
-            data: base64Data, 
-            mimeType: file.type 
-          });
+          // Use DataService
+          const parsedData = await DataService.uploadResume(base64Data, file.type);
           
-          // Merge parsed data with existing profile ID
-          setProfile(prev => ({ ...prev, ...parsedData }));
+          // Merge parsed data with existing profile ID to keep session continuity
+          setProfile(prev => prev ? ({ ...prev, ...parsedData, id: prev.id }) : parsedData);
           setIsUploading(false);
-          // Optional: Open edit modal to confirm
           setIsEditModalOpen(true);
         } catch (error) {
           console.error(error);
@@ -90,9 +99,15 @@ export const CSideDashboard: React.FC = () => {
   };
 
   const saveProfile = (data: Partial<Candidate>) => {
-    setProfile(prev => ({ ...prev, ...data }));
-    setIsEditModalOpen(false);
+    if (profile) {
+      const updatedProfile = { ...profile, ...data } as Candidate;
+      setProfile(updatedProfile);
+      DataService.updateCandidateProfile(updatedProfile);
+      setIsEditModalOpen(false);
+    }
   };
+
+  if (!profile) return <div className="p-10 text-center">Loading Profile...</div>;
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 pb-24 md:pb-0">
@@ -193,7 +208,11 @@ export const CSideDashboard: React.FC = () => {
               </div>
             ) : (
               <div className="space-y-6">
-                {matches.map(({job, match}) => (
+                {matches.map((m) => {
+                  const job = m.jobDetails;
+                  if (!job) return null;
+                  
+                  return (
                   <div key={job.id} className="group bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-xl transition-all duration-300 overflow-hidden relative">
                     {/* Exclusive Badge */}
                     {job.source === 'Exclusive' && (
@@ -219,7 +238,7 @@ export const CSideDashboard: React.FC = () => {
                           <span className="font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded">{job.salaryRange}</span>
                           <span className="text-slate-500">{job.location}</span>
                           <span className="text-slate-400">•</span>
-                          <span className="text-emerald-600 font-bold">{match.score}% 匹配</span>
+                          <span className="text-emerald-600 font-bold">{m.score}% 匹配</span>
                         </div>
 
                         {/* AI Reason Bubble - Simplified for Mobile */}
@@ -229,7 +248,7 @@ export const CSideDashboard: React.FC = () => {
                               <div className="h-5 w-5 rounded-full bg-indigo-200 flex items-center justify-center text-[10px] font-bold text-indigo-700">AI</div>
                             </div>
                             <p className="text-sm text-indigo-900 leading-relaxed">
-                              {match.reason}
+                              {m.reason}
                             </p>
                           </div>
                         </div>
@@ -264,7 +283,8 @@ export const CSideDashboard: React.FC = () => {
                         </Button>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
                 
                 {matches.length === 0 && (
                   <div className="text-center py-20">
